@@ -1,88 +1,88 @@
 # AGENTS.md
 
-## Rol
+## Role
 
-Actúa como un ingeniero senior de alto rendimiento. Sé conciso, directo, decisivo y orientado a ejecución. Prefiere soluciones simples, mantenibles y aptas para producción. No sobrediseñes: evita abstracciones pesadas, capas nuevas o dependencias grandes para cambios pequeños.
+Act like a high-performance senior engineer. Be concise, direct, decisive, and execution-focused. Prefer simple, maintainable, production-ready solutions. Do not over-engineer: avoid heavy abstractions, extra layers, or large dependencies for small changes.
 
-Este archivo aplica a todo el repositorio.
+This file applies to the entire repository.
 
-## Reglas Operativas
+## Operating Rules
 
-- Usa `rtk` delante de los comandos de shell cuando esté disponible: `rtk npm test`, `rtk npm run typecheck`, `rtk rg "texto" src`.
-- El fichero `/Users/daviddelatorre/.codex/RTK.md` existe en este entorno y exige el uso de `rtk`. El path `/Users/david/.codex/RTK.md` puede no existir.
-- Antes de editar, revisa `rtk git status --short`. Puede haber cambios locales de otra persona; no los reviertas ni los reformatees.
-- Usa `rg`/`rtk rg` para buscar. Evita exploraciones manuales lentas.
-- No añadas dependencias salvo que el beneficio sea claro y proporcional.
-- Mantén TypeScript estricto, ESM y imports relativos con extensión `.js`, como ya hace el proyecto.
-- No metas secretos, tokens, números reales sensibles ni datos personales innecesarios en código, tests, logs o docs.
+- Prefix shell commands with `rtk` when available: `rtk npm test`, `rtk npm run typecheck`, `rtk rg "text" src`.
+- `/Users/daviddelatorre/.codex/RTK.md` exists in this environment and requires `rtk`. `/Users/david/.codex/RTK.md` may not exist.
+- Before editing, check `rtk git status --short`. There may be local changes from someone else; do not revert or reformat them.
+- Use `rg`/`rtk rg` for search. Avoid slow manual exploration.
+- Do not add dependencies unless the benefit is clear and proportional.
+- Keep strict TypeScript, ESM, and relative imports with `.js` extensions, matching the current project.
+- Do not put secrets, tokens, real sensitive phone numbers, or unnecessary personal data in code, tests, logs, or docs.
 
-## Producto
+## Product
 
-Pepita es un asistente personal WhatsApp-first para un piloto pequeño y controlado. Recibe mensajes naturales por WhatsApp, identifica al usuario por teléfono, mantiene estado aislado por usuario, guarda memoria, crea tareas/recordatorios, prepara acciones arriesgadas como aprobaciones y expone endpoints HTTP de administración local.
+Pepita is a WhatsApp-first personal assistant for a small controlled pilot. It receives natural-language WhatsApp messages, identifies each user by phone number, keeps state isolated per user, stores memory, creates tasks/reminders, prepares risky actions as approvals, and exposes local HTTP admin endpoints.
 
-La tesis del producto es reducir carga mental, no construir un framework genérico de agentes.
+The product thesis is mental-load reduction, not a generic agent framework.
 
 ## Stack
 
-- Node.js `>=25.7.0`, necesario por `node:sqlite`.
+- Node.js `>=25.7.0`, required for `node:sqlite`.
 - TypeScript `strict`, `moduleResolution: NodeNext`, ESM.
-- Fastify para HTTP.
-- SQLite nativo mediante `node:sqlite`.
-- Vitest para tests.
-- WhatsApp Cloud API oficial; no WhatsApp Web scraping.
-- Runtime de agente local determinista y runtime Pi/Codex opcional mediante `@earendil-works/pi-*`.
+- Fastify for HTTP.
+- Native SQLite through `node:sqlite`.
+- Vitest for tests.
+- Official WhatsApp Cloud API; no WhatsApp Web scraping.
+- Deterministic local agent runtime and optional Pi/Codex runtime through `@earendil-works/pi-*`.
 
-## Mapa Del Código
+## Code Map
 
-- `src/config.ts`: parseo de entorno y validaciones de producción.
-- `src/domain.ts`: tipos de dominio, IDs y reloj.
-- `src/db.ts`: apertura de SQLite y creación de directorios.
-- `src/repository.ts`: migración, queries, transacciones, serialización JSON, aislamiento por usuario.
-- `src/whatsapp.ts`: verificación webhook, parseo de mensajes entrantes y senders dry-run/cloud.
-- `src/agent.ts`: contrato `AgentRuntime`, runtime local, runtime Pi y herramientas expuestas a Pi.
-- `src/services.ts`: conversación, aprobaciones, outbox, exportación y borrado de datos.
-- `src/scheduler.ts`: scanner de recordatorios vencidos.
-- `src/app.ts`: app Fastify, rutas webhook/admin, auth admin, firma WhatsApp, flush de outbox.
-- `src/server.ts`: entrypoint, config real, migración, wiring y cierre limpio.
-- `tests/*.test.ts`: contratos de comportamiento. Léelos antes de tocar el módulo correspondiente.
+- `src/config.ts`: environment parsing and production validations.
+- `src/domain.ts`: domain types, IDs, and clock helpers.
+- `src/db.ts`: SQLite opening and directory creation.
+- `src/repository.ts`: migration, queries, transactions, JSON serialization, user isolation.
+- `src/whatsapp.ts`: webhook verification, inbound message parsing, and dry-run/cloud senders.
+- `src/agent.ts`: `AgentRuntime` contract, local runtime, Pi runtime, and tools exposed to Pi.
+- `src/services.ts`: conversation, approvals, outbox, user-data export and deletion.
+- `src/scheduler.ts`: due reminder scanner.
+- `src/app.ts`: Fastify app, webhook/admin routes, admin auth, WhatsApp signatures, outbox flush.
+- `src/server.ts`: entrypoint, real config, migration, wiring, and clean shutdown.
+- `tests/*.test.ts`: behavior contracts. Read the matching test before touching a module.
 
-## Invariantes De Arquitectura
+## Architecture Invariants
 
-- El estado de producto vive en Pepita, no dentro del runtime del agente.
-- `AgentRuntime.handleMessage` devuelve efectos estructurados (`reply`, `memoryFacts`, `tasks`, `approvals`); no debe mutar sistemas externos directamente.
-- Cada usuario se resuelve por teléfono y toda entidad persistida lleva `userId`. Nunca mezcles memoria, tareas, approvals, outbox o audit logs entre usuarios.
-- Las acciones externas o irreversibles no se ejecutan automáticamente. Deben crear `Approval` de tipo `email_draft` o `browser_action`.
-- El runtime Pi solo recibe herramientas Pepita acotadas. No le des shell, edición de archivos, navegador irrestricto ni credenciales directas.
-- Los mensajes entrantes reales deben reclamarse con `claimInboundMessage` para idempotencia antes de procesar efectos.
-- Un turno de conversación debe persistirse de forma atómica con `persistConversationTurn`: efectos, respuesta en outbox y audit logs juntos.
-- Los recordatorios se reclaman con `claimAndEnqueueReminder` para evitar duplicados y deben auditar `reminder.enqueued`.
-- Respeta la ventana WhatsApp de 24 horas: fuera de ventana se usa `templateName`; dentro de ventana, mensaje libre.
-- Si `WHATSAPP_APP_SECRET` está configurado, valida HMAC sobre raw body antes de confiar en el JSON.
-- Sanitiza errores antes de guardarlos o devolverlos. `sanitizeError` debe seguir redacting tokens Bearer, claves OpenAI y tokens WhatsApp.
+- Product state lives in Pepita, not inside the agent runtime.
+- `AgentRuntime.handleMessage` returns structured effects (`reply`, `memoryFacts`, `tasks`, `approvals`); it must not mutate external systems directly.
+- Each user is resolved by phone number and every persisted entity carries `userId`. Never mix memory, tasks, approvals, outbox, or audit logs across users.
+- External or irreversible actions are not executed automatically. They must create an `Approval` of type `email_draft` or `browser_action`.
+- The Pi runtime only receives scoped Pepita tools. Do not give it shell access, file editing, unrestricted browser access, or direct credentials.
+- Real inbound messages must be claimed with `claimInboundMessage` for idempotency before processing effects.
+- A conversation turn must be persisted atomically with `persistConversationTurn`: effects, outbox reply, and audit logs together.
+- Reminders are claimed with `claimAndEnqueueReminder` to avoid duplicates and must audit `reminder.enqueued`.
+- Respect WhatsApp's 24-hour service window: outside the window use `templateName`; inside the window use a free-form message.
+- If `WHATSAPP_APP_SECRET` is configured, validate the HMAC over the raw body before trusting the JSON.
+- Sanitize errors before storing or returning them. `sanitizeError` must keep redacting Bearer tokens, OpenAI keys, and WhatsApp tokens.
 
-## Seguridad Y Producción
+## Security And Production
 
-- En producción, `ADMIN_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_MODE=cloud`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` y un `WHATSAPP_VERIFY_TOKEN` no default son obligatorios.
-- Si `HOST` no es localhost, exige `ADMIN_TOKEN`.
-- Local por defecto debe ser seguro: SQLite en `.data/`, runtime `local`, WhatsApp `dry-run`.
-- Tests y desarrollo no deben hacer llamadas reales a WhatsApp, OpenAI/Pi ni otros servicios externos.
-- No implementes envíos reales de email, compras, formularios, cambios de cuenta ni navegación con credenciales sin un flujo explícito de aprobación y auditoría.
-- Mantén exportación y borrado de datos por usuario sin filtrar datos de otros usuarios.
+- In production, `ADMIN_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_MODE=cloud`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, and a non-default `WHATSAPP_VERIFY_TOKEN` are required.
+- If `HOST` is not localhost, require `ADMIN_TOKEN`.
+- Local defaults must be safe: SQLite under `.data/`, `local` runtime, WhatsApp `dry-run`.
+- Tests and development must not make real calls to WhatsApp, OpenAI/Pi, or other external services.
+- Do not implement real email sending, purchases, forms, account changes, or credentialed browsing without an explicit approval and audit flow.
+- Keep user-data export and deletion scoped to one user without leaking other users' data.
 
-## Convenciones De Implementación
+## Implementation Conventions
 
-- Cambios pequeños y explícitos. Prefiere funciones concretas y tipos simples.
-- Sigue los patrones existentes de `ParseResult`, helpers privados, repositorio con mapeadores `map*` y servicios con interfaces mínimas.
-- En payloads JSON persistidos usa `JsonObject` y `safeJsonStringify`/`safeJsonParse`; no guardes valores no serializables.
-- Si cambias esquema SQLite, añade tests de repositorio y trata la migración con cuidado. Actualiza `PRAGMA user_version` solo de forma intencional.
-- Conserva respuestas WhatsApp breves y naturales en español.
-- El runtime local debe ser determinista y útil para tests; no lo conviertas en un LLM oculto.
-- El código de envío WhatsApp debe validar destinatarios y normalizar `+346...` a formato Cloud API sin `+`.
-- No añadas UI salvo que se pida explícitamente; hoy la superficie admin es HTTP.
+- Keep changes small and explicit. Prefer concrete functions and simple types.
+- Follow existing patterns: `ParseResult`, private helpers, repository `map*` mappers, and services with minimal interfaces.
+- For persisted JSON payloads, use `JsonObject` and `safeJsonStringify`/`safeJsonParse`; do not store non-serializable values.
+- If you change the SQLite schema, add repository tests and handle migration carefully. Update `PRAGMA user_version` only intentionally.
+- Keep WhatsApp replies short, natural, and in Spanish.
+- The local runtime must stay deterministic and useful for tests; do not turn it into a hidden LLM.
+- WhatsApp sending code must validate recipients and normalize `+346...` to the Cloud API format without `+`.
+- Do not add a UI unless explicitly requested; the current admin surface is HTTP.
 
 ## Tests
 
-Comandos base:
+Base commands:
 
 ```bash
 rtk npm test
@@ -90,19 +90,19 @@ rtk npm run typecheck
 rtk npm run build
 ```
 
-Tests dirigidos por zona:
+Targeted tests by area:
 
-- Config, rutas, auth admin, firmas y webhooks: `rtk npm test tests/app.test.ts`
+- Config, routes, admin auth, signatures, and webhooks: `rtk npm test tests/app.test.ts`
 - WhatsApp parser/sender: `rtk npm test tests/whatsapp.test.ts`
-- Runtime local/Pi y herramientas: `rtk npm test tests/agent.test.ts`
-- Conversación, approvals, outbox y export/delete: `rtk npm test tests/services.test.ts`
-- SQLite, transacciones, JSON, idempotencia y aislamiento: `rtk npm test tests/repository.test.ts`
-- Recordatorios y ventana de servicio: `rtk npm test tests/scheduler.test.ts`
-- Flujo end-to-end del MVP: `rtk npm test tests/acceptance.test.ts`
+- Local/Pi runtime and tools: `rtk npm test tests/agent.test.ts`
+- Conversation, approvals, outbox, and export/delete: `rtk npm test tests/services.test.ts`
+- SQLite, transactions, JSON, idempotency, and isolation: `rtk npm test tests/repository.test.ts`
+- Reminders and service window: `rtk npm test tests/scheduler.test.ts`
+- End-to-end MVP flow: `rtk npm test tests/acceptance.test.ts`
 
-Para cambios de comportamiento, añade o ajusta primero un test enfocado. Antes de entregar cambios amplios, ejecuta al menos el test dirigido, `rtk npm run typecheck` y, si el tiempo lo permite, `rtk npm test`.
+For behavior changes, add or adjust a focused test first. Before delivering broad changes, run at least the targeted test, `rtk npm run typecheck`, and, if time allows, `rtk npm test`.
 
-## Operación Local
+## Local Operation
 
 Setup:
 
@@ -118,7 +118,7 @@ Health check:
 rtk curl http://127.0.0.1:3000/health
 ```
 
-Simulación local:
+Local simulation:
 
 ```bash
 rtk curl -s http://127.0.0.1:3000/admin/simulate-message \
@@ -126,21 +126,21 @@ rtk curl -s http://127.0.0.1:3000/admin/simulate-message \
   -d '{"from":"+34600000001","messageId":"local.demo.1","text":"recuerdame llamar al gestor manana","timestamp":"2030-01-01T09:00:00.000Z","now":"2030-01-01T09:00:00.000Z"}'
 ```
 
-Si `ADMIN_TOKEN` está configurado, añade `authorization: Bearer <token>` a endpoints `/admin/*`.
+If `ADMIN_TOKEN` is configured, add `authorization: Bearer <token>` to `/admin/*` endpoints.
 
-## Documentos De Contexto
+## Context Documents
 
-- `README.md`: setup, env vars, operación y modelo de seguridad actual.
-- `docs/superpowers/specs/2026-06-20-pepita-mvp-spec.md`: contexto de producto y decisiones del MVP.
-- `docs/superpowers/plans/2026-06-20-pepita-mvp-implementation.md`: plan histórico; úsalo como contexto, no como fuente de verdad si contradice el código actual.
+- `README.md`: setup, env vars, operations, and current safety model.
+- `docs/superpowers/specs/2026-06-20-pepita-mvp-spec.md`: product context and MVP decisions.
+- `docs/superpowers/plans/2026-06-20-pepita-mvp-implementation.md`: historical plan; use it as context, not as the source of truth when it conflicts with current code.
 
-## No Objetivos Actuales
+## Current Non-Goals
 
-- Signup público.
+- Public signup.
 - Billing.
-- UI final para usuarios.
+- Final end-user UI.
 - WhatsApp Web scraping.
-- Envío autónomo de email.
-- Acciones web irreversibles sin aprobación.
-- Integraciones amplias con Gmail/Calendar/Drive.
-- Memoria vectorial u observabilidad a escala producción.
+- Autonomous email sending.
+- Irreversible web actions without approval.
+- Broad Gmail/Calendar/Drive integrations.
+- Vector memory or production-scale observability.
