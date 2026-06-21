@@ -14,6 +14,7 @@ try {
 
   await repository.migrate();
 
+  const devLog = createDevLogger();
   const app = createApp({
     config,
     repository,
@@ -21,10 +22,12 @@ try {
       runtime: config.agentRuntime,
       piProvider: config.piProvider,
       piModel: config.piModel,
-      piAuthPath: config.piAuthPath ?? undefined
+      piAuthPath: config.piAuthPath ?? undefined,
+      devLog
     }),
     whatsappSender: createWhatsAppSender(config),
-    logger: true
+    logger: true,
+    devLog
   });
 
   const shutdown = async (): Promise<void> => {
@@ -66,4 +69,25 @@ function createWhatsAppSender(config: AppConfig): WhatsAppSender {
     accessToken: config.whatsappAccessToken,
     phoneNumberId: config.whatsappPhoneNumberId
   });
+}
+
+function createDevLogger() {
+  return (event: string, fields: Record<string, unknown> = {}) => {
+    const suffix = Object.entries(fields)
+      .map(([key, value]) => `${key}=${formatLogValue(value)}`)
+      .join(" ");
+    console.log(`${event}${suffix.length > 0 ? ` ${suffix}` : ""}`);
+  };
+}
+
+function formatLogValue(value: unknown): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return String(value);
+  if (value === undefined) return "undefined";
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }

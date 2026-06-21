@@ -89,7 +89,9 @@ export class WhatsAppCloudSender implements WhatsAppSender {
     });
 
     if (!response.ok) {
-      throw new Error(`WhatsApp Cloud API request failed with HTTP ${response.status}`);
+      const body = await safeResponseText(response);
+      const detail = body.length > 0 ? `: ${body}` : "";
+      throw new Error(`WhatsApp Cloud API request failed with HTTP ${response.status}${detail}`);
     }
   }
 }
@@ -204,4 +206,12 @@ function safeUnsupportedMessageType(value: string): string {
   const allowedLabels = new Set(["audio", "image", "video", "document", "button", "interactive", "unknown"]);
 
   return allowedLabels.has(normalized) ? normalized : "unknown";
+}
+
+async function safeResponseText(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch (error) {
+    return `Could not read response body: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }

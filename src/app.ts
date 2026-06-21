@@ -18,11 +18,15 @@ export type CreateAppDependencies = {
   agentRuntime: AgentRuntime;
   whatsappSender: WhatsAppSender;
   logger?: FastifyServerOptions["logger"];
+  devLog?: DevLog;
 };
 
+export type DevLog = (event: string, fields?: Record<string, unknown>) => void;
+
 export function createApp(deps: CreateAppDependencies): FastifyInstance {
-  const app = Fastify({ logger: deps.logger ?? false });
-  const conversationService = new ConversationService(deps.repository, deps.agentRuntime);
+  const app = Fastify({ logger: deps.logger ?? false, disableRequestLogging: true });
+  const devLog = deps.devLog ?? noopDevLog;
+  const conversationService = new ConversationService(deps.repository, deps.agentRuntime, devLog);
   const approvalService = new ApprovalService(deps.repository);
   const userDataService = new UserDataService(deps.repository);
   const scheduler = new ReminderScheduler(deps.repository);
@@ -85,33 +89,45 @@ export function createApp(deps: CreateAppDependencies): FastifyInstance {
     let processed = 0;
     let skipped = 0;
 
-    request.log.info(
-      {
-        messages: messages.length,
-        from: messages.map((message) => maskPhoneNumber(message.from))
-      },
-      "WhatsApp webhook received"
-    );
+    if (messages.length === 0) {
+      devLog("wa.empty");
+    }
 
     for (const message of messages) {
+      devLog("wa.in", {
+        from: message.from,
+        messageId: message.messageId,
+        text: message.text
+      });
+
       const claimed = await deps.repository.claimInboundMessage(message.messageId);
       if (!claimed) {
         skipped += 1;
+        devLog("wa.skip", { reason: "duplicate", from: message.from, messageId: message.messageId });
         continue;
       }
 
-      await conversationService.handleInboundMessage({
+      const handled = await conversationService.handleInboundMessage({
         from: message.from,
         messageId: message.messageId,
         text: message.text,
         timestamp: message.timestamp
       });
+      devLog("agent.out", {
+        from: handled.user.phoneNumber,
+        userId: handled.user.id,
+        messageId: message.messageId,
+        reply: handled.result.reply,
+        memoryFacts: handled.result.memoryFacts,
+        tasks: handled.result.tasks,
+        approvals: handled.result.approvals
+      });
       processed += 1;
     }
 
     if (processed > 0) {
-      const flushResult = await flushQueuedOutgoingMessages(deps.repository, deps.whatsappSender, new Date());
-      request.log.info({ processed, skipped, ...flushResult }, "WhatsApp outgoing flush completed");
+      const flushResult = await flushQueuedOutgoingMessages(deps.repository, deps.whatsappSender, new Date(), devLog);
+      devLog("wa.flush", { processed, skipped, ...flushResult });
     }
 
     return { received: true, messages: messages.length, processed, skipped };
@@ -173,7 +189,7 @@ export function createApp(deps: CreateAppDependencies): FastifyInstance {
     const parsed = parseNowPayload(request.body);
     if (!parsed.ok) return badRequest(reply, parsed.error);
 
-    return flushQueuedOutgoingMessages(deps.repository, deps.whatsappSender, parsed.value);
+    return flushQueuedOutgoingMessages(deps.repository, deps.whatsappSender, parsed.value, devLog);
   });
 
   app.post("/admin/approvals/:id/resolve", async (request, reply) => {
@@ -323,7 +339,8 @@ function isNotFoundError(error: unknown): boolean {
 async function flushQueuedOutgoingMessages(
   repository: SqliteRepository,
   sender: WhatsAppSender,
-  now: Date
+  now: Date,
+  devLog: DevLog = noopDevLog
 ): Promise<{ sent: number; failed: number }> {
   const sentAt = now.toISOString();
   const messages = await repository.listQueuedOutgoingMessages(sentAt);
@@ -331,7 +348,7 @@ async function flushQueuedOutgoingMessages(
   let failed = 0;
 
   for (const message of messages) {
-    const updated = await sendOutgoingMessage(repository, sender, message, sentAt);
+    const updated = await sendOutgoingMessage(repository, sender, message, sentAt, devLog);
     if (updated.status === "sent") sent += 1;
     if (updated.status === "failed") failed += 1;
   }
@@ -343,11 +360,18 @@ async function sendOutgoingMessage(
   repository: SqliteRepository,
   sender: WhatsAppSender,
   message: OutgoingMessage,
-  sentAt: string
+  sentAt: string,
+  devLog: DevLog
 ): Promise<OutgoingMessage> {
   try {
     await sender.sendText(message.to, message.body);
   } catch (error) {
+    devLog("wa.send_failed", {
+      outgoingMessageId: message.id,
+      to: message.to,
+      body: message.body,
+      error: rawErrorMessage(error)
+    });
     return repository.updateOutgoingMessage({
       ...message,
       status: "failed",
@@ -356,12 +380,19 @@ async function sendOutgoingMessage(
     });
   }
 
-  return repository.updateOutgoingMessage({
+  const updated = await repository.updateOutgoingMessage({
     ...message,
     status: "sent",
     sentAt,
     error: null
   });
+  devLog("wa.sent", {
+    outgoingMessageId: updated.id,
+    to: updated.to,
+    body: updated.body
+  });
+
+  return updated;
 }
 
 function isAuthorizedBearerToken(header: string | undefined, expectedToken: string): boolean {
@@ -369,13 +400,6 @@ function isAuthorizedBearerToken(header: string | undefined, expectedToken: stri
   if (!header?.startsWith(prefix)) return false;
 
   return timingSafeStringEqual(header.slice(prefix.length), expectedToken);
-}
-
-function maskPhoneNumber(value: string): string {
-  const digits = value.replace(/\D/g, "");
-  if (digits.length <= 4) return "***";
-
-  return `${digits.slice(0, 2)}***${digits.slice(-2)}`;
 }
 
 function isValidWhatsAppSignature(
@@ -395,4 +419,10 @@ function timingSafeStringEqual(actual: string, expected: string): boolean {
   const expectedBuffer = Buffer.from(expected);
 
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function noopDevLog(): void {}
+
+function rawErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

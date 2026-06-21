@@ -36,6 +36,8 @@ export interface AgentRuntime {
   handleMessage(context: AgentContext): Promise<AgentResult>;
 }
 
+export type DevLog = (event: string, fields?: Record<string, unknown>) => void;
+
 export type PiSessionRunnerInput = {
   provider: string;
   model: string;
@@ -45,6 +47,7 @@ export type PiSessionRunnerInput = {
   cwd: string;
   agentDir?: string;
   authPath?: string;
+  devLog?: DevLog;
 };
 
 export type PiSessionRunnerResult = {
@@ -60,6 +63,7 @@ export type PiAgentRuntimeOptions = {
   agentDir?: string;
   authPath?: string;
   runSession?: PiSessionRunner;
+  devLog?: DevLog;
 };
 
 export class LocalAgentRuntime implements AgentRuntime {
@@ -123,6 +127,7 @@ export class PiAgentRuntime implements AgentRuntime {
   private readonly agentDir?: string;
   private readonly authPath?: string;
   private readonly runSession: PiSessionRunner;
+  private readonly devLog: DevLog;
 
   constructor(options: PiAgentRuntimeOptions = {}) {
     this.provider = options.provider ?? "openai-codex";
@@ -131,12 +136,13 @@ export class PiAgentRuntime implements AgentRuntime {
     this.agentDir = options.agentDir;
     this.authPath = options.authPath;
     this.runSession = options.runSession ?? runPiAgentSession;
+    this.devLog = options.devLog ?? noopDevLog;
   }
 
   async handleMessage(context: AgentContext): Promise<AgentResult> {
     const result = createEmptyResult();
     let finishedReply = "";
-    const tools = createPepitaTools(context, result, (reply) => {
+    const tools = createPepitaTools(context, result, this.devLog, (reply) => {
       finishedReply = reply.trim();
     });
     const completed = await this.runSession({
@@ -147,7 +153,8 @@ export class PiAgentRuntime implements AgentRuntime {
       tools,
       cwd: this.cwd,
       agentDir: this.agentDir,
-      authPath: this.authPath
+      authPath: this.authPath,
+      devLog: this.devLog
     });
 
     return {
@@ -161,15 +168,17 @@ export function createAgentRuntime({
   runtime,
   piProvider,
   piModel,
-  piAuthPath
+  piAuthPath,
+  devLog
 }: {
   runtime: "local" | "pi";
   piProvider?: string;
   piModel?: string;
   piAuthPath?: string;
+  devLog?: DevLog;
 }): AgentRuntime {
   return runtime === "pi"
-    ? new PiAgentRuntime({ provider: piProvider, model: piModel, authPath: piAuthPath })
+    ? new PiAgentRuntime({ provider: piProvider, model: piModel, authPath: piAuthPath, devLog })
     : new LocalAgentRuntime();
 }
 
@@ -182,7 +191,12 @@ function createEmptyResult(): AgentResult {
   };
 }
 
-function createPepitaTools(context: AgentContext, result: AgentResult, finish: (reply: string) => void): ToolDefinition[] {
+function createPepitaTools(
+  context: AgentContext,
+  result: AgentResult,
+  devLog: DevLog,
+  finish: (reply: string) => void
+): ToolDefinition[] {
   return [
     defineTool({
       name: "pepita_remember_fact",
@@ -198,6 +212,7 @@ function createPepitaTools(context: AgentContext, result: AgentResult, finish: (
         confidence: Type.Number({ description: "Confidence from 0 to 1.", minimum: 0, maximum: 1 })
       }),
       async execute(_toolCallId, params) {
+        logToolCall(devLog, context, "pepita_remember_fact", params);
         const text = params.text.trim();
         if (text.length === 0) throw new Error("Memory text is required");
 
@@ -227,6 +242,7 @@ function createPepitaTools(context: AgentContext, result: AgentResult, finish: (
         dueAt: Type.Optional(Type.String({ description: "ISO-8601 due date/time, if clear from the message." }))
       }),
       async execute(_toolCallId, params) {
+        logToolCall(devLog, context, "pepita_create_task", params);
         const title = params.title.trim();
         if (title.length === 0) throw new Error("Task title is required");
 
@@ -259,6 +275,7 @@ function createPepitaTools(context: AgentContext, result: AgentResult, finish: (
         payload: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "JSON payload for the approval." }))
       }),
       async execute(_toolCallId, params) {
+        logToolCall(devLog, context, "pepita_request_approval", params);
         const title = params.title.trim();
         if (title.length === 0) throw new Error("Approval title is required");
 
@@ -288,6 +305,7 @@ function createPepitaTools(context: AgentContext, result: AgentResult, finish: (
         reply: Type.String({ description: "Final WhatsApp reply to send to the user." })
       }),
       async execute(_toolCallId, params) {
+        logToolCall(devLog, context, "pepita_finish", params);
         finish(params.reply);
 
         return {
@@ -329,9 +347,22 @@ async function runPiAgentSession(input: PiSessionRunnerInput): Promise<PiSession
   });
 
   let finalText = "";
+  input.devLog?.("pi.start", { provider: input.provider, model: input.model });
+
   const unsubscribe = session.subscribe((event) => {
+    if (event.type === "auto_retry_start") {
+      input.devLog?.("pi.retry", {
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        delayMs: event.delayMs,
+        error: event.errorMessage
+      });
+    }
     if (event.type === "message_end") {
       finalText = extractMessageText(event.message) || finalText;
+      if (messageRole(event.message) === "assistant" && finalText.length > 0) {
+        input.devLog?.("pi.message", { text: finalText });
+      }
     }
   });
 
@@ -343,6 +374,15 @@ async function runPiAgentSession(input: PiSessionRunnerInput): Promise<PiSession
   }
 
   return { finalText };
+}
+
+function logToolCall(devLog: DevLog, context: AgentContext, name: string, params: Record<string, unknown>): void {
+  devLog("agent.tool", {
+    name,
+    userId: context.userId,
+    messageId: context.messageId,
+    params
+  });
 }
 
 function createPiResourceLoader(systemPrompt: string): ResourceLoader {
@@ -411,9 +451,15 @@ function extractMessageText(message: unknown): string {
     .trim();
 }
 
+function messageRole(message: unknown): string {
+  return isPlainObject(message) && typeof message.role === "string" ? message.role : "";
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+function noopDevLog(): void {}
 
 function toJsonObject(value: unknown): JsonObject {
   return isJsonObject(value) ? value : {};

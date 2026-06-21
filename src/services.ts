@@ -65,10 +65,13 @@ type UserDataRepository = {
 
 const safeFailureReply = "Ahora mismo no he podido procesar esto. Lo he dejado registrado para revisarlo.";
 
+export type DevLog = (event: string, fields?: Record<string, unknown>) => void;
+
 export class ConversationService {
   constructor(
     private readonly repository: ConversationRepository,
-    private readonly agent: AgentRuntime
+    private readonly agent: AgentRuntime,
+    private readonly devLog: DevLog = noopDevLog
   ) {}
 
   async handleInboundMessage(input: InboundMessageInput): Promise<{ user: User; result: AgentResult }> {
@@ -101,6 +104,13 @@ export class ConversationService {
 
       return { user, result };
     } catch (error) {
+      this.devLog("agent.error", {
+        from: user.phoneNumber,
+        userId: user.id,
+        messageId: input.messageId,
+        error: rawErrorMessage(error)
+      });
+
       await this.repository.addAuditLog({
         userId: user.id,
         actor: "agent",
@@ -310,4 +320,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function noopDevLog(): void {}
+
+function rawErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
