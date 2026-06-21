@@ -181,9 +181,12 @@ describe("Pepita MVP acceptance", () => {
     expect(admin.json().approvals).toMatchObject([{ id: approvals[0].id, status: "pending" }]);
   });
 
-  it("can switch to Pi mode by config without external API credentials or calls", async () => {
+  it("can switch to Pi mode by config and fails safely when Pi auth is not configured", async () => {
     const { app, repo, config } = await createAcceptanceContext({
-      env: { PEPITA_AGENT_RUNTIME: "pi" }
+      env: {
+        PEPITA_AGENT_RUNTIME: "pi",
+        PEPITA_PI_AUTH_PATH: "/tmp/pepita-missing-pi-auth.json"
+      }
     });
 
     const response = await simulate(app, {
@@ -194,7 +197,10 @@ describe("Pepita MVP acceptance", () => {
 
     const user = findUser(await repo.listUsers(), "+34600000001");
     expect(config.agentRuntime).toBe("pi");
-    expect(response.reply).toContain("Pi runtime configurado");
+    expect(config.piProvider).toBe("openai-codex");
+    expect(config.piModel).toBe("gpt-5.4-mini");
+    expect(config.piAuthPath).toBe("/tmp/pepita-missing-pi-auth.json");
+    expect(response.reply).toBe("Ahora mismo no he podido procesar esto. Lo he dejado registrado para revisarlo.");
     expect(await repo.listTasks(user.id)).toHaveLength(0);
     expect(await repo.listApprovals(user.id)).toHaveLength(0);
   });
@@ -322,7 +328,12 @@ async function createAcceptanceContext(
   const app = createApp({
     config,
     repository: repo,
-    agentRuntime: createAgentRuntime({ runtime: config.agentRuntime }),
+    agentRuntime: createAgentRuntime({
+      runtime: config.agentRuntime,
+      piProvider: config.piProvider,
+      piModel: config.piModel,
+      piAuthPath: config.piAuthPath ?? undefined
+    }),
     whatsappSender: sender
   });
   apps.push(app);

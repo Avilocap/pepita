@@ -34,6 +34,9 @@ describe("loadConfig", () => {
       port: 3000,
       databasePath: ".data/pepita.sqlite",
       agentRuntime: "local",
+      piProvider: "openai-codex",
+      piModel: "gpt-5.4-mini",
+      piAuthPath: null,
       adminToken: null,
       whatsappVerifyToken: "change-me",
       whatsappAccessToken: null,
@@ -51,6 +54,9 @@ describe("loadConfig", () => {
         ADMIN_TOKEN: "admin-token",
         PEPITA_DATABASE_PATH: "/tmp/pepita.sqlite",
         PEPITA_AGENT_RUNTIME: "pi",
+        PEPITA_PI_PROVIDER: "openai-codex",
+        PEPITA_PI_MODEL: "gpt-5.4",
+        PEPITA_PI_AUTH_PATH: "/tmp/pi-auth.json",
         WHATSAPP_VERIFY_TOKEN: "verify-token",
         WHATSAPP_ACCESS_TOKEN: "access-token",
         WHATSAPP_PHONE_NUMBER_ID: "phone-number-id",
@@ -62,6 +68,9 @@ describe("loadConfig", () => {
       port: 4010,
       databasePath: "/tmp/pepita.sqlite",
       agentRuntime: "pi",
+      piProvider: "openai-codex",
+      piModel: "gpt-5.4",
+      piAuthPath: "/tmp/pi-auth.json",
       adminToken: "admin-token",
       whatsappVerifyToken: "verify-token",
       whatsappAccessToken: "access-token",
@@ -216,6 +225,36 @@ describe("HTTP app", () => {
         sourceMessageId: "wamid.memory"
       }
     ]);
+  });
+
+  it("POST /webhooks/whatsapp sends the queued reply immediately for real webhook traffic", async () => {
+    const sender = new DryRunWhatsAppSender();
+    const { app, repo } = await createAppContext({ sender });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/whatsapp",
+      payload: whatsappPayload({
+        id: "wamid.reply",
+        from: "34600000001",
+        text: "hola pepita"
+      })
+    });
+
+    const [user] = await repo.listUsers();
+    const [outgoing] = await repo.listOutgoingMessages(user.id);
+    expect(response.statusCode).toBe(200);
+    expect(sender.sentTextMessages).toEqual([
+      {
+        to: "+34600000001",
+        text: "Puedo ayudarte a recordar datos, crear tareas o preparar borradores."
+      }
+    ]);
+    expect(outgoing).toMatchObject({
+      to: "+34600000001",
+      status: "sent",
+      sentAt: expect.any(String)
+    });
   });
 
   it("POST /webhooks/whatsapp accepts a valid X-Hub-Signature-256 when an app secret is configured", async () => {
@@ -609,6 +648,9 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     port: 3000,
     databasePath: ":memory:",
     agentRuntime: "local",
+    piProvider: "openai-codex",
+    piModel: "gpt-5.4-mini",
+    piAuthPath: null,
     adminToken: null,
     whatsappVerifyToken: "verify-token",
     whatsappAccessToken: null,

@@ -7,6 +7,6 @@ describe("project scaffold", () => {
   });
 
   it("starts the compiled server entrypoint", () => {
-    expect(packageJson.scripts.start).toBe("node dist/src/server.js");
+    expect(packageJson.scripts.start).toBe("node --env-file-if-exists=.env dist/src/server.js");
   });
 });

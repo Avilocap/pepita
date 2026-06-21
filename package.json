@@ -12,7 +12,9 @@
     "start": "node --env-file-if-exists=.env dist/src/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start:whatsapp": "bash -lc 'pids=\"\"; cleanup(){ trap - INT TERM EXIT; for pid in $pids; do kill \"$pid\" 2>/dev/null || true; done; wait 2>/dev/null || true; }; trap cleanup INT TERM EXIT; (cloudflared tunnel --config ~/.cloudflared/config.yml run 2>&1 | sed -u \"s/^/[cloudflared] /\") & pids=\"$pids $!\"; (npm start 2>&1 | sed -u \"s/^/[pepita] /\") & pids=\"$pids $!\"; wait'",
+    "pi:login": "mkdir -p ~/.pi/agent && cd ~/.pi/agent && pi-ai login openai-codex"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.79.8",

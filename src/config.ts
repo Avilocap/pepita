@@ -3,6 +3,9 @@ export type AppConfig = {
   port: number;
   databasePath: string;
   agentRuntime: "local" | "pi";
+  piProvider: string;
+  piModel: string;
+  piAuthPath: string | null;
   adminToken: string | null;
   whatsappVerifyToken: string;
   whatsappAccessToken: string | null;
@@ -50,6 +53,9 @@ export function loadConfig(env: Env = process.env): AppConfig {
     port: parsePort(env.PORT),
     databasePath: valueOrDefault(env.PEPITA_DATABASE_PATH, ".data/pepita.sqlite"),
     agentRuntime: parseAgentRuntime(env.PEPITA_AGENT_RUNTIME),
+    piProvider: valueOrDefault(env.PEPITA_PI_PROVIDER, "openai-codex"),
+    piModel: valueOrDefault(env.PEPITA_PI_MODEL, "gpt-5.4-mini"),
+    piAuthPath: optionalValue(env.PEPITA_PI_AUTH_PATH),
     adminToken,
     whatsappVerifyToken,
     whatsappAccessToken,

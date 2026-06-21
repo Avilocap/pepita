@@ -180,19 +180,113 @@ describe("createAgentRuntime", () => {
   });
 
   it("returns PiAgentRuntime for pi runtime without external API calls during construction", () => {
-    expect(createAgentRuntime({ runtime: "pi" })).toBeInstanceOf(PiAgentRuntime);
+    expect(
+      createAgentRuntime({
+        runtime: "pi",
+        piProvider: "openai-codex",
+        piModel: "gpt-5.4-mini"
+      })
+    ).toBeInstanceOf(PiAgentRuntime);
   });
 });
 
 describe("PiAgentRuntime", () => {
-  it("returns a safe message and no external writes when credentials or tools are not configured", async () => {
-    const runtime = new PiAgentRuntime();
+  it("returns the effects accumulated by Pepita tools during a Pi turn", async () => {
+    const runtime = new PiAgentRuntime({
+      provider: "openai-codex",
+      model: "gpt-5.4-mini",
+      runSession: async ({ tools, prompt, systemPrompt }) => {
+        expect(prompt).toContain("recuerdame llamar al gestor manana");
+        expect(systemPrompt).toContain("pepita_finish");
 
-    const result = await runtime.handleMessage(createContext("haz algo con pi"));
+        const remember = tools.find((tool) => tool.name === "pepita_remember_fact");
+        const task = tools.find((tool) => tool.name === "pepita_create_task");
+        const approval = tools.find((tool) => tool.name === "pepita_request_approval");
+        const finish = tools.find((tool) => tool.name === "pepita_finish");
+        expect(remember).toBeDefined();
+        expect(task).toBeDefined();
+        expect(approval).toBeDefined();
+        expect(finish).toBeDefined();
 
-    expect(result.reply).toBe(
-      "Pi runtime configurado, pero este MVP aun requiere conectar herramientas reales. Uso modo seguro."
-    );
-    expectEmptyWrites(result);
+        await remember?.execute(
+          "tool-memory",
+          { text: "Prefiere llamadas por la tarde", confidence: 0.8 },
+          undefined,
+          undefined,
+          {} as never
+        );
+        await task?.execute(
+          "tool-task",
+          { title: "Llamar al gestor", dueAt: "2030-05-21T09:00:00.000Z" },
+          undefined,
+          undefined,
+          {} as never
+        );
+        await approval?.execute(
+          "tool-approval",
+          {
+            type: "email_draft",
+            title: "Correo al gestor",
+            payload: { draftText: "Hola", sourceText: "recuerdame llamar al gestor manana" }
+          },
+          undefined,
+          undefined,
+          {} as never
+        );
+        await finish?.execute(
+          "tool-finish",
+          { reply: "He guardado la preferencia, el recordatorio y el borrador." },
+          undefined,
+          undefined,
+          {} as never
+        );
+
+        return { finalText: "" };
+      }
+    });
+
+    const result = await runtime.handleMessage(createContext("recuerdame llamar al gestor manana"));
+
+    expect(result).toEqual({
+      reply: "He guardado la preferencia, el recordatorio y el borrador.",
+      memoryFacts: [{ text: "Prefiere llamadas por la tarde", confidence: 0.8 }],
+      tasks: [{ title: "Llamar al gestor", dueAt: "2030-05-21T09:00:00.000Z" }],
+      approvals: [
+        {
+          type: "email_draft",
+          title: "Correo al gestor",
+          payload: { draftText: "Hola", sourceText: "recuerdame llamar al gestor manana" }
+        }
+      ]
+    });
+  });
+
+  it("fills tomorrow at 09:00 when Pi queues an obvious manana task without dueAt", async () => {
+    const context = createContext("recuerdame llamar al gestor manana", {
+      now: new Date("2030-05-20T17:30:00.000Z")
+    });
+    const runtime = new PiAgentRuntime({
+      provider: "openai-codex",
+      model: "gpt-5.4-mini",
+      runSession: async ({ tools }) => {
+        const task = tools.find((tool) => tool.name === "pepita_create_task");
+        const finish = tools.find((tool) => tool.name === "pepita_finish");
+
+        await task?.execute(
+          "tool-task",
+          { title: "Llamar al gestor manana" },
+          undefined,
+          undefined,
+          {} as never
+        );
+        await finish?.execute("tool-finish", { reply: "Te lo recuerdo manana." }, undefined, undefined, {} as never);
+
+        return { finalText: "" };
+      }
+    });
+
+    const result = await runtime.handleMessage(context);
+
+    expect(result.tasks).toEqual([{ title: "Llamar al gestor manana", dueAt: nextLocalDayAtNineIso(context.now) }]);
   });
 });

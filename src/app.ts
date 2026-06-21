@@ -85,6 +85,14 @@ export function createApp(deps: CreateAppDependencies): FastifyInstance {
     let processed = 0;
     let skipped = 0;
 
+    request.log.info(
+      {
+        messages: messages.length,
+        from: messages.map((message) => maskPhoneNumber(message.from))
+      },
+      "WhatsApp webhook received"
+    );
+
     for (const message of messages) {
       const claimed = await deps.repository.claimInboundMessage(message.messageId);
       if (!claimed) {
@@ -99,6 +107,11 @@ export function createApp(deps: CreateAppDependencies): FastifyInstance {
         timestamp: message.timestamp
       });
       processed += 1;
+    }
+
+    if (processed > 0) {
+      const flushResult = await flushQueuedOutgoingMessages(deps.repository, deps.whatsappSender, new Date());
+      request.log.info({ processed, skipped, ...flushResult }, "WhatsApp outgoing flush completed");
     }
 
     return { received: true, messages: messages.length, processed, skipped };
@@ -356,6 +369,13 @@ function isAuthorizedBearerToken(header: string | undefined, expectedToken: stri
   if (!header?.startsWith(prefix)) return false;
 
   return timingSafeStringEqual(header.slice(prefix.length), expectedToken);
+}
+
+function maskPhoneNumber(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length <= 4) return "***";
+
+  return `${digits.slice(0, 2)}***${digits.slice(-2)}`;
 }
 
 function isValidWhatsAppSignature(

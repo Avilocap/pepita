@@ -1,4 +1,4 @@
-# Pepita
+# Pepita MVP
 
 Pepita is a WhatsApp-first personal assistant for a small controlled pilot. It receives natural-language WhatsApp messages, resolves each user by phone number, keeps user state isolated, stores memory, creates tasks and reminders, drafts risky actions for approval, and exposes HTTP admin endpoints for local operation.
 
@@ -30,11 +30,30 @@ The defaults in `.env.example` are safe for local development. They use SQLite u
 | `WHATSAPP_SEND_MODE` | `dry-run` | Use `dry-run` locally or `cloud` for WhatsApp Cloud API sends. |
 | `WHATSAPP_ACCESS_TOKEN` | empty | Required when `WHATSAPP_SEND_MODE=cloud`. |
 | `WHATSAPP_PHONE_NUMBER_ID` | empty | Required when `WHATSAPP_SEND_MODE=cloud`. |
-| `OPENAI_API_KEY` | empty | Reserved for future Pi/OpenAI-backed runtime wiring. |
-| `PEPITA_PI_PROVIDER` | `openai` | Reserved Pi adapter setting. |
-| `PEPITA_PI_MODEL` | `gpt-4.1-mini` | Reserved Pi adapter setting. |
+| `OPENAI_API_KEY` | empty | Optional for API-key providers. Not required for `openai-codex` subscription auth. |
+| `PEPITA_PI_PROVIDER` | `openai-codex` | Pi provider used when `PEPITA_AGENT_RUNTIME=pi`. |
+| `PEPITA_PI_MODEL` | `gpt-5.4-mini` | Pi model used when `PEPITA_AGENT_RUNTIME=pi`. |
+| `PEPITA_PI_AUTH_PATH` | empty | Optional custom Pi auth file path. Leave empty to use `~/.pi/agent/auth.json`. |
 
 Production requires `ADMIN_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_SEND_MODE=cloud`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, and a non-default WHATSAPP_VERIFY_TOKEN.
+
+## Pi / Codex Runtime
+
+For real local AI replies through your ChatGPT/Codex subscription, authenticate Pi once:
+
+```bash
+./node_modules/.bin/pi-ai login openai-codex
+```
+
+Then set:
+
+```env
+PEPITA_AGENT_RUNTIME=pi
+PEPITA_PI_PROVIDER=openai-codex
+PEPITA_PI_MODEL=gpt-5.4-mini
+```
+
+Pepita exposes only Pepita-specific tools to Pi: queue memory facts, queue tasks, queue approval requests, and finish the WhatsApp turn. It does not expose shell, file edit, or unrestricted browser tools to the WhatsApp agent.
 
 ## Run Tests
 
@@ -95,6 +114,8 @@ GET/POST https://YOUR_HOST/webhooks/whatsapp
 Use `WHATSAPP_VERIFY_TOKEN` as the webhook verification token. For production, set `WHATSAPP_APP_SECRET` so Pepita rejects unsigned or invalid `X-Hub-Signature-256` payloads.
 
 Local development can use `WHATSAPP_SEND_MODE=dry-run`. Real outbound WhatsApp messages require `WHATSAPP_SEND_MODE=cloud`, `WHATSAPP_ACCESS_TOKEN`, and `WHATSAPP_PHONE_NUMBER_ID`.
+
+Inbound WhatsApp webhook requests enqueue the assistant reply and immediately flush the outbox through the configured sender. The local `/admin/simulate-message` endpoint still only simulates the conversation and leaves sends to `/admin/outbox/flush`.
 
 ## Safety model
 

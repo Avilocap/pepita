@@ -17,7 +17,12 @@ try {
   const app = createApp({
     config,
     repository,
-    agentRuntime: createAgentRuntime({ runtime: config.agentRuntime }),
+    agentRuntime: createAgentRuntime({
+      runtime: config.agentRuntime,
+      piProvider: config.piProvider,
+      piModel: config.piModel,
+      piAuthPath: config.piAuthPath ?? undefined
+    }),
     whatsappSender: createWhatsAppSender(config),
     logger: true
   });
