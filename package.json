@@ -8,8 +8,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/server.ts",
-    "start": "node dist/src/server.js",
+    "dev": "node --env-file-if-exists=.env ./node_modules/.bin/tsx watch src/server.ts",
+    "start": "node --env-file-if-exists=.env dist/src/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
