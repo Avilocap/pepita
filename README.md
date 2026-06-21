@@ -2,8 +2,6 @@
 
 Pepita is a WhatsApp-first personal assistant for a small controlled pilot. It receives natural-language WhatsApp messages, resolves each user by phone number, keeps user state isolated, stores memory, creates tasks and reminders, drafts risky actions for approval, and exposes HTTP admin endpoints for local operation.
 
-The MVP is intentionally small: product state lives in SQLite, the default agent runtime is deterministic and local, and no external WhatsApp, email, or Pi/OpenAI credentials are required for development.
-
 ## Requirements
 
 - Node >=25.7.0 is required because the app uses built-in `node:sqlite`.
